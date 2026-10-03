@@ -5,7 +5,7 @@ education department has agreed to it. The server stores nothing (no disk, no da
 never logged), but the data still passes through Render's machines.
 
 ## 1. Put the code on GitHub
-The repo root must be this folder (`app.py`, `render.yaml` and `requirements.txt` at the top).
+The repo root must be this folder, with `app.py`, `config.py`, `render.yaml` and `requirements.txt` at the top.
 Before the first push run `git status` and check no roster, workbook, photo of real students or data file is staged.
 The `.gitignore` excludes `*.csv`, `*.xlsx`, `data_*.json` and `out/`. The photos in `tests/fixtures/` are dummy data.
 
