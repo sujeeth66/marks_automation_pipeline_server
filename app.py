@@ -19,7 +19,7 @@ Settings (environment variables):
   ALLOWED_ORIGINS  comma-separated origins allowed to call from a browser page (e.g. chrome-extension://<id>)
   MAX_UPLOAD_MB    largest request body, default 20
   RATE_PER_MIN     requests per minute per key, default 30
-  MODEL_PATH       default scan/model.json
+  MODEL_PATH       default model.json next to app.py
 """
 import functools
 import hashlib
@@ -59,7 +59,7 @@ ALLOW_NO_AUTH = os.environ.get("ALLOW_NO_AUTH") == "1"
 ALLOWED_ORIGINS = set(_env_list("ALLOWED_ORIGINS"))
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "20"))
 RATE_PER_MIN = int(os.environ.get("RATE_PER_MIN", "30"))
-MODEL_PATH = os.environ.get("MODEL_PATH", os.path.join(HERE, "scan", "model.json"))
+MODEL_PATH = os.environ.get("MODEL_PATH", os.path.join(HERE, "model.json"))
 
 if not API_KEYS and not ALLOW_NO_AUTH:
     raise RuntimeError("Set API_KEYS (comma-separated secret keys). For local testing only, set ALLOW_NO_AUTH=1.")
