@@ -174,13 +174,20 @@ def write_workbook(path, tag, where, roster, subjects, working_days):
     wb.save(path)
 
 
-def generate(roster, cls, section, out_dir, school="", working_days=None, academic_year="", exam_type=""):
-    """Make every PDF and the typing workbook for one class + section. roster = [(student_id, name), ...].
-    Writes into out_dir/sheets and out_dir/entry and returns the workbook path."""
+def generate(
+    roster, cls, section, out_dir, school="", working_days=None,
+    academic_year="", exam_type="", output="all",
+):
+    """Make selected output for one class + section. roster = [(student_id, name), ...].
+    Returns the workbook path when output includes Excel."""
+    if output not in {"all", "excel", "pdf"}:
+        raise ValueError("output must be 'all', 'excel', or 'pdf'")
     tag = f"class{cls}{section}"
     sheets, entry = os.path.join(out_dir, "sheets"), os.path.join(out_dir, "entry")
-    os.makedirs(sheets, exist_ok=True)
-    os.makedirs(entry, exist_ok=True)
+    if output in {"all", "pdf"}:
+        os.makedirs(sheets, exist_ok=True)
+    if output in {"all", "excel"}:
+        os.makedirs(entry, exist_ok=True)
     details = [f"Class {cls} - Section {section}"]
     if school:
         details.append(school)
@@ -191,31 +198,35 @@ def generate(roster, cls, section, out_dir, school="", working_days=None, academ
     where = "  |  ".join(details)
     where_pdf = escape(where)  # the PDF text is markup, so & and < must be escaped
 
-    for key in CLASS_SUBJECTS[cls]:
-        label = SUBJECT_LABELS[key]
-        fname = label.replace(" ", "_")
-        headers = [f"{name}<br/>{meaning}<br/>({mx} marks)" for name, meaning, mx in SLOTS]
+    if output in {"all", "pdf"}:
+        for key in CLASS_SUBJECTS[cls]:
+            label = SUBJECT_LABELS[key]
+            fname = label.replace(" ", "_")
+            headers = [f"{name}<br/>{meaning}<br/>({mx} marks)" for name, meaning, mx in SLOTS]
+            build_pdf(
+                os.path.join(sheets, f"{tag}_{fname}.pdf"),
+                f"{label} - marks sheet",
+                f"{where_pdf}<br/>Write marks as numbers. Write <b>A</b> if the student was absent. "
+                f"Teacher: ____________________   Date: ____________",
+                f"{tag}  |  {label}",
+                roster, headers, [62] * len(SLOTS),
+            )
+
+        att_head = "Days attended" + (f"<br/>(out of {working_days})" if working_days else "")
         build_pdf(
-            os.path.join(sheets, f"{tag}_{fname}.pdf"),
-            f"{label} - marks sheet",
-            f"{where_pdf}<br/>Write marks as numbers. Write <b>A</b> if the student was absent. "
-            f"Teacher: ____________________   Date: ____________",
-            f"{tag}  |  {label}",
-            roster, headers, [62] * len(SLOTS),
+            os.path.join(sheets, f"{tag}_Attendance.pdf"),
+            "Attendance sheet",
+            f"{where_pdf}<br/>Write the number of days each student attended."
+            + (f" Working days: {working_days}." if working_days else ""),
+            f"{tag}  |  Attendance",
+            roster, [att_head], [100],
         )
 
-    att_head = "Days attended" + (f"<br/>(out of {working_days})" if working_days else "")
-    build_pdf(
-        os.path.join(sheets, f"{tag}_Attendance.pdf"),
-        "Attendance sheet",
-        f"{where_pdf}<br/>Write the number of days each student attended."
-        + (f" Working days: {working_days}." if working_days else ""),
-        f"{tag}  |  Attendance",
-        roster, [att_head], [100],
-    )
-    workbook = os.path.join(entry, f"{tag}_entry.xlsx")
-    write_workbook(workbook, tag, where, roster, CLASS_SUBJECTS[cls], working_days)
-    return workbook
+    if output in {"all", "excel"}:
+        workbook = os.path.join(entry, f"{tag}_entry.xlsx")
+        write_workbook(workbook, tag, where, roster, CLASS_SUBJECTS[cls], working_days)
+        return workbook
+    return None
 
 
 def main():

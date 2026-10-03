@@ -2,8 +2,8 @@
 
 Endpoints (all but /health need the header  X-API-Key: <one of API_KEYS>):
   GET  /health   -> {"ok": true}                      no data, for the host's health check
-  POST /sheets   JSON {class, section, school?, academic_year?, exam_type?, working_days?, roster:[{id,name}]}
-                 -> a zip: printable PDF sheets + the Excel typing workbook
+  POST /sheets   JSON {class, section, output?, school?, academic_year?, exam_type?, working_days?, roster:[{id,name}]}
+                 -> Excel workbook, PDF zip, or (by default) a zip containing both
   POST /merge    multipart: workbook=<filled .xlsx>, class, working_days?
                  -> {"ok":true,"data":{...},"incomplete":[...]}  or 422 {"ok":false,"errors":[...]}
   POST /scan     multipart: photos=<1-4 images, in page order>, class, tab, working_days?, expected_rows?
@@ -186,6 +186,9 @@ def sheets():
     if not isinstance(body, dict):
         raise BadRequest("send a JSON body")
     cls = _class(body.get("class"))
+    output = body.get("output", "all")
+    if output not in ("all", "excel", "pdf"):
+        raise BadRequest("output must be 'excel', 'pdf', or 'all'")
     section = str(body.get("section", "")).strip()
     if not SECTION_RE.match(section):
         raise BadRequest("section must be 1 to 3 letters or digits")
@@ -210,18 +213,34 @@ def sheets():
         roster.append((sid, name))
 
     with tempfile.TemporaryDirectory() as d:  # deleted as soon as the zip is built
-        make_sheets.generate(
+        workbook_path = make_sheets.generate(
             roster, cls, section, d, school, working_days,
             academic_year=academic_year, exam_type=exam_type,
+            output=output,
         )
+        if output == "excel":
+            if workbook_path is None:
+                raise RuntimeError("Excel generation did not produce a workbook")
+            with open(workbook_path, "rb") as workbook_file:
+                workbook_data = io.BytesIO(workbook_file.read())
+            return send_file(
+                workbook_data,
+                mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                as_attachment=True,
+                download_name=f"class{cls}{section}_entry.xlsx",
+            )
+
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-            for sub in ("sheets", "entry"):
-                for f in sorted(os.listdir(os.path.join(d, sub))):
-                    z.write(os.path.join(d, sub, f), arcname=f"{sub}/{f}")
+            for f in sorted(os.listdir(os.path.join(d, "sheets"))):
+                z.write(os.path.join(d, "sheets", f), arcname=f"sheets/{f}")
+            if output == "all":
+                if workbook_path is None:
+                    raise RuntimeError("Combined generation did not produce a workbook")
+                z.write(workbook_path, arcname=f"entry/{os.path.basename(workbook_path)}")
     buf.seek(0)
     return send_file(buf, mimetype="application/zip", as_attachment=True,
-                     download_name=f"class{cls}{section}_sheets.zip")
+                     download_name=f"class{cls}{section}_{'pdf' if output == 'pdf' else 'sheets'}.zip")
 
 
 def _safe_xlsx(raw):

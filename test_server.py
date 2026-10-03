@@ -81,6 +81,21 @@ class ServerTests(unittest.TestCase):
         self.assertIn("Academic year: 2025-26", details)
         self.assertIn("Exam type: Term 1", details)
 
+    def test_excel_only_returns_only_the_workbook(self):
+        r = self.c.post("/sheets", json=body(output="excel"), headers=KEY)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", r.content_type)
+        workbook = load_workbook(io.BytesIO(r.data), read_only=True)
+        self.assertIn("Read me", workbook.sheetnames)
+        workbook.close()
+
+    def test_pdf_only_returns_only_pdf_files(self):
+        r = self.c.post("/sheets", json=body(output="pdf"), headers=KEY)
+        self.assertEqual(r.status_code, 200)
+        names = zipfile.ZipFile(io.BytesIO(r.data)).namelist()
+        self.assertEqual(len(names), 5)
+        self.assertTrue(all(name.endswith(".pdf") for name in names))
+
     def test_classes_1_and_2_have_three_subjects(self):
         r = self.c.post("/sheets", json=body(**{"class": 1}), headers=KEY)
         names = zipfile.ZipFile(io.BytesIO(r.data)).namelist()
@@ -89,6 +104,7 @@ class ServerTests(unittest.TestCase):
 
     def test_sheets_rejects_bad_input(self):
         for bad in (body(**{"class": 9}), body(section=""), body(section="TOOLONG"), body(working_days=0),
+                    body(output="csv"), body(output=["excel"]),
                     body(roster=[]), body(roster=roster(121)), body(roster=[{"id": "../x", "name": "A"}]),
                     body(roster=[{"id": "1", "name": ""}]), body(roster=[{"id": "1", "name": "A"}] * 2)):
             self.assertEqual(self.c.post("/sheets", json=bad, headers=KEY).status_code, 400, bad.get("section"))

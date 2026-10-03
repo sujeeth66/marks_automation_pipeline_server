@@ -33,6 +33,9 @@ curl -X POST https://YOUR-SERVICE.onrender.com/sheets -H "X-API-Key: YOUR_KEY" -
      -d '{"class":3,"section":"A","school":"TEST SCHOOL","academic_year":"2025-26","exam_type":"Term 1","working_days":37,"roster":[{"id":"1001","name":"TEST ONE"}]}' -o sheets.zip
 ```
 
+The `/sheets` request may include `"output":"excel"` for a standalone `.xlsx` response or
+`"output":"pdf"` for a ZIP containing only PDFs. Omit `output` (or use `"all"`) for both.
+
 ## 4. Calling it from the extension
 - Call the server from the extension's **background script (service worker)** and list the service URL under
   `host_permissions`. Requests from there are not blocked by the cross-origin rules that apply to a page.
