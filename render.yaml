@@ -1,0 +1,17 @@
+# Render Blueprint: Dashboard > New > Blueprint > pick this repo. The repo root must be this folder.
+services:
+  - type: web
+    name: marks-pipeline
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # One worker (the free instance has 512 MB), two threads so a health check is never stuck behind a scan.
+    startCommand: gunicorn app:app --workers 1 --threads 2 --timeout 120 --bind 0.0.0.0:$PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3          # Render wants a full patch version; if the build rejects it, pick another 3.12.x
+      - key: API_KEYS
+        generateValue: true    # Render makes a random secret; read it in the service's Environment tab
+      - key: ALLOWED_ORIGINS
+        sync: false            # set in the dashboard: chrome-extension://<your extension id>

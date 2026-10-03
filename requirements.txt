@@ -1,0 +1,7 @@
+flask>=3.0,<4
+gunicorn>=22
+numpy>=1.26,<3
+opencv-python-headless>=4.9,<5
+openpyxl>=3.1,<4
+reportlab>=4,<5
+pillow>=10
