@@ -22,3 +22,4 @@ Never commit real student data: the `.gitignore` here excludes the roster, entry
 workbook out), `POST /merge` (filled workbook in, data for the portal out) and `POST /scan` (photos in, cell values
 and pictures out, for a review screen). See `DEPLOY.md` to run it on Render, and `python -m unittest discover -s tests -v`
 to test it.
+Done
