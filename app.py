@@ -2,7 +2,7 @@
 
 Endpoints (all but /health need the header  X-API-Key: <one of API_KEYS>):
   GET  /health   -> {"ok": true}                      no data, for the host's health check
-  POST /sheets   JSON {class, section, school?, working_days?, roster:[{id,name}]}
+  POST /sheets   JSON {class, section, school?, academic_year?, exam_type?, working_days?, roster:[{id,name}]}
                  -> a zip: printable PDF sheets + the Excel typing workbook
   POST /merge    multipart: workbook=<filled .xlsx>, class, working_days?
                  -> {"ok":true,"data":{...},"incomplete":[...]}  or 422 {"ok":false,"errors":[...]}
@@ -190,6 +190,8 @@ def sheets():
     if not SECTION_RE.match(section):
         raise BadRequest("section must be 1 to 3 letters or digits")
     school = CONTROL_RE.sub("", str(body.get("school", ""))).strip()[:120]
+    academic_year = CONTROL_RE.sub("", str(body.get("academic_year", ""))).strip()[:40]
+    exam_type = CONTROL_RE.sub("", str(body.get("exam_type", ""))).strip()[:80]
     working_days = _int(body.get("working_days"), "working_days", 1, 366, optional=True)
     raw = body.get("roster")
     if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_STUDENTS:
@@ -208,7 +210,10 @@ def sheets():
         roster.append((sid, name))
 
     with tempfile.TemporaryDirectory() as d:  # deleted as soon as the zip is built
-        make_sheets.generate(roster, cls, section, d, school, working_days)
+        make_sheets.generate(
+            roster, cls, section, d, school, working_days,
+            academic_year=academic_year, exam_type=exam_type,
+        )
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             for sub in ("sheets", "entry"):

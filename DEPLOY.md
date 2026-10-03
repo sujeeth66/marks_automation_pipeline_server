@@ -30,7 +30,7 @@ to `API_KEYS` after a comma. To revoke someone, remove their key and let the ser
 curl https://YOUR-SERVICE.onrender.com/health                       # {"ok":true}
 curl -X POST https://YOUR-SERVICE.onrender.com/sheets               # 401: no key
 curl -X POST https://YOUR-SERVICE.onrender.com/sheets -H "X-API-Key: YOUR_KEY" -H "Content-Type: application/json" \
-     -d '{"class":3,"section":"A","working_days":37,"roster":[{"id":"1001","name":"TEST ONE"}]}' -o sheets.zip
+     -d '{"class":3,"section":"A","school":"TEST SCHOOL","academic_year":"2025-26","exam_type":"Term 1","working_days":37,"roster":[{"id":"1001","name":"TEST ONE"}]}' -o sheets.zip
 ```
 
 ## 4. Calling it from the extension

@@ -174,14 +174,21 @@ def write_workbook(path, tag, where, roster, subjects, working_days):
     wb.save(path)
 
 
-def generate(roster, cls, section, out_dir, school="", working_days=None):
+def generate(roster, cls, section, out_dir, school="", working_days=None, academic_year="", exam_type=""):
     """Make every PDF and the typing workbook for one class + section. roster = [(student_id, name), ...].
     Writes into out_dir/sheets and out_dir/entry and returns the workbook path."""
     tag = f"class{cls}{section}"
     sheets, entry = os.path.join(out_dir, "sheets"), os.path.join(out_dir, "entry")
     os.makedirs(sheets, exist_ok=True)
     os.makedirs(entry, exist_ok=True)
-    where = f"Class {cls} - Section {section}" + (f"  |  {school}" if school else "")
+    details = [f"Class {cls} - Section {section}"]
+    if school:
+        details.append(school)
+    if academic_year:
+        details.append(f"Academic year: {academic_year}")
+    if exam_type:
+        details.append(f"Exam type: {exam_type}")
+    where = "  |  ".join(details)
     where_pdf = escape(where)  # the PDF text is markup, so & and < must be escaped
 
     for key in CLASS_SUBJECTS[cls]:
@@ -218,11 +225,16 @@ def main():
     ap.add_argument("--section", required=True)
     ap.add_argument("--working-days", type=int)
     ap.add_argument("--school", default="")
+    ap.add_argument("--academic-year", default="")
+    ap.add_argument("--exam-type", default="")
     ap.add_argument("--out", default="out")
     a = ap.parse_args()
 
     roster = read_roster(a.roster)
-    generate(roster, a.cls, a.section, a.out, a.school, a.working_days)
+    generate(
+        roster, a.cls, a.section, a.out, a.school, a.working_days,
+        academic_year=a.academic_year, exam_type=a.exam_type,
+    )
     tag = f"class{a.cls}{a.section}"
     print(f"{len(roster)} students, {len(CLASS_SUBJECTS[a.cls])} subjects + attendance -> {a.out}/ (typing workbook: entry/{tag}_entry.xlsx)")
 

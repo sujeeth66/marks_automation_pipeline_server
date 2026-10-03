@@ -24,7 +24,11 @@ def roster(n=6):
 
 
 def body(**kw):
-    b = {"class": 3, "section": "A", "school": "TEST SCHOOL & CO", "working_days": 37, "roster": roster()}
+    b = {
+        "class": 3, "section": "A", "school": "TEST SCHOOL & CO",
+        "academic_year": "2025-26", "exam_type": "Term 1",
+        "working_days": 37, "roster": roster(),
+    }
     b.update(kw)
     return b
 
@@ -67,10 +71,15 @@ class ServerTests(unittest.TestCase):
     def test_sheets_zip_contents(self):
         r = self.c.post("/sheets", json=body(), headers=KEY)
         self.assertEqual(r.status_code, 200)
-        names = zipfile.ZipFile(io.BytesIO(r.data)).namelist()
+        archive = zipfile.ZipFile(io.BytesIO(r.data))
+        names = archive.namelist()
         self.assertEqual(len(names), 4 + 1 + 1)  # class 3: 4 subject PDFs + attendance PDF + workbook
         self.assertIn("entry/class3A_entry.xlsx", names)
         self.assertIn("sheets/class3A_Maths.pdf", names)
+        workbook = load_workbook(io.BytesIO(archive.read("entry/class3A_entry.xlsx")))
+        details = workbook["Read me"]["A2"].value
+        self.assertIn("Academic year: 2025-26", details)
+        self.assertIn("Exam type: Term 1", details)
 
     def test_classes_1_and_2_have_three_subjects(self):
         r = self.c.post("/sheets", json=body(**{"class": 1}), headers=KEY)
