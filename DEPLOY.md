@@ -36,6 +36,43 @@ curl -X POST https://YOUR-SERVICE.onrender.com/sheets -H "X-API-Key: YOUR_KEY" -
 The `/sheets` request may include `"output":"excel"` for a standalone `.xlsx` response or
 `"output":"pdf"` for a ZIP containing only PDFs. Omit `output` (or use `"all"`) for both.
 
+`POST /submit` compiles photographs into a reviewable portal-data draft. Send multipart fields:
+
+- `class`: class number
+- `roster`: JSON array of `{ "id": "...", "name": "..." }` objects
+- `section`: optional expected section; generic-photo metadata must match it
+- `working_days`: optional whole number
+- `photos`: recommended generic file field; upload photos from one or more generated tabs and the metadata QR
+  routes each photo automatically
+- `photos_<subject key>`: optional explicit routing, one or more photo files for each subject to scan, using keys
+  in `config.py`
+- `photos_Attendance`: optional photo files for the attendance sheet
+
+Use either generic `photos` or named fields, not both. For generic uploads, use PDFs returned by `/sheets` and
+include the full page, per-page header metadata QR, all four corner QR fiducials, table, and row QRs. The server
+decodes QRs from the original uploaded resolution and only reduces the rectified page for mark reading. The metadata QR routes
+each page automatically, including continuation pages; the server rejects unknown metadata, class mismatch, or
+mixed sections. The corner codes rectify page perspective; row codes identify students, so roster order does not
+matter. Each roster student must appear exactly once in each submitted tab. Unreadable, duplicate, unknown, or
+missing student codes cause a 422 response with identity issues; the server does not match by row order.
+
+The printed score entries use one box per digit. Write right-aligned (for example `□ 7` for 7); leaving all boxes
+empty records `A` for absent. The same rule applies to attendance: an empty attendance entry becomes `A`, and
+omitting attendance photos sets attendance to `A` for all roster students.
+
+Upload one or more subjects; for a quick test, upload just the English sheet in the generic `photos` field (or
+explicitly name it `photos_Eng`). Every student must still appear exactly once in each submitted tab. The response
+`tabs` list names only the submitted
+tabs. Likewise, each student's `marks` object only includes submitted subjects; `attendance` is included only if
+attendance photos were uploaded. A caller must leave all unsubmitted portal fields untouched. Empty fields within
+a scanned sheet still mean `A`.
+
+On success, `data` is a partial `fillMarks()` payload, `scans` includes the matched student ID and each cell's value,
+confidence, image, and review flag, while `review` lists malformed or below-0.90-confidence cells. This is a draft:
+the extension should fill it into the portal, highlight those fields, and let the teacher review/correct everything
+before final submission. Note that the extension is not wired to `/submit` yet; this endpoint lets you test server
+recognition and partial payloads independently.
+
 ## 4. Calling it from the extension
 - Call the server from the extension's **background script (service worker)** and list the service URL under
   `host_permissions`. Requests from there are not blocked by the cross-origin rules that apply to a page.

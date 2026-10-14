@@ -7,9 +7,8 @@ Usage:
 Reads the workbook made by make_sheets.py: a tab per subject plus Attendance.
 Matching is by student_id, never by row position.
 Checks: marks are whole numbers within each slot's max, or A; attendance is a whole
-number (and not above --working-days); every tab has the same students.
-If anything is wrong it lists the problems and writes nothing. Blank cells are not
-errors (they are listed as incomplete, and fillMarks() skips them).
+number (and not above --working-days), or A. Blank mark and attendance cells are
+treated as A (absent).
 """
 import argparse
 import json
@@ -18,7 +17,7 @@ import sys
 
 from openpyxl import load_workbook
 
-from config import CLASS_SUBJECTS, SLOTS, SUBJECT_LABELS
+from config import MAX_STUDENTS
 
 
 class WorkbookError(Exception):
@@ -47,9 +46,9 @@ def read_rows(wb, sheet, ncols):
 
 
 def parse_mark(v, mx):
-    """-> (value, error). Blank gives ("", None)."""
+    """-> (value, error). A blank cell means absent."""
     if v == "":
-        return "", None
+        return "A", None
     if v == "A":
         return "A", None
     if re.fullmatch(r"\d{1,3}", v) and int(v) <= mx:
@@ -57,82 +56,106 @@ def parse_mark(v, mx):
     return None, f'"{v}" is not a whole number from 0 to {mx}, or A'
 
 
-def merge_workbook(wb, cls, working_days=None):
+def merge_workbook(wb, subjects=None, has_attendance=True, working_days=None):
     """Check an opened entry workbook and merge it. -> (data, errors, incomplete).
-    data is what fillMarks() reads. Nothing is raised for bad cells; they are listed in errors."""
+    data is what fillMarks() reads. Nothing is raised for bad cells; they are listed in errors.
+    subjects: list of dicts with 'key', 'label', 'slots' (each slot has 'name' and 'max')
+    has_attendance: whether the workbook should have an Attendance tab"""
     errors, data, names = [], {}, {}
+    subjects = subjects or []
 
-    # attendance
-    for r, sid, name, (v,) in read_rows(wb, "Attendance", 1):
-        if sid in data:
-            errors.append(f"Attendance row {r}: duplicate student_id {sid}")
-            continue
-        names[sid] = name
-        v = re.sub(r"\.0+$", "", v)
-        if v == "":
-            att = ""
-        elif re.fullmatch(r"\d{1,3}", v):
-            att = int(v)
-            if working_days and att > working_days:
-                errors.append(f"Attendance row {r} ({name}): {att} is more than {working_days} working days")
+    # attendance (optional)
+    if has_attendance:
+        if "Attendance" not in wb.sheetnames:
+            errors.append("the workbook has no Attendance tab")
         else:
-            att = None
-            errors.append(f'Attendance row {r} ({name}): "{v}" is not a whole number')
-        data[sid] = {"attendance": att, "marks": {}}
+            for r, sid, name, (v,) in read_rows(wb, "Attendance", 1):
+                if sid in data:
+                    errors.append(f"Attendance row {r}: duplicate student_id {sid}")
+                    continue
+                names[sid] = name
+                v = re.sub(r"\.0+$", "", v)
+                if v == "":
+                    att = "A"
+                elif v == "A":
+                    att = "A"
+                elif re.fullmatch(r"\d{1,3}", v):
+                    att = int(v)
+                    if working_days and att > working_days:
+                        errors.append(f"Attendance row {r} ({name}): {att} is more than {working_days} working days")
+                else:
+                    att = None
+                    errors.append(f'Attendance row {r} ({name}): "{v}" is not a whole number')
+                data[sid] = {"attendance": att, "marks": {}}
 
     # subjects
-    for key in CLASS_SUBJECTS[cls]:
-        label = SUBJECT_LABELS[key]
+    for subj in subjects:
+        key = subj["key"]
+        label = subj["label"]
+        slots = subj.get("slots", [])
         seen = set()
-        for r, sid, name, cells in read_rows(wb, label, len(SLOTS)):
+        for r, sid, name, cells in read_rows(wb, label, len(slots)):
             if sid in seen:
                 errors.append(f"{label} row {r}: duplicate student_id {sid}")
                 continue
             seen.add(sid)
-            if sid not in data:
+            if has_attendance and sid not in data:
                 errors.append(f"{label} row {r}: student_id {sid} is not on the Attendance tab")
                 continue
+            if not has_attendance and sid not in data:
+                data[sid] = {"marks": {}}
+                names[sid] = name
             vals = []
-            for (slot_name, _, mx), v in zip(SLOTS, cells):
+            for slot, v in zip(slots, cells):
+                mx = slot.get("max", 0)
                 val, err = parse_mark(v, mx)
                 if err:
-                    errors.append(f"{label} row {r} ({name}), {slot_name}: {err}")
+                    errors.append(f"{label} row {r} ({name}), {slot.get('name', 'slot')}: {err}")
                 vals.append(val)
             data[sid]["marks"][key] = vals
         for sid in data:
             if sid not in seen:
-                errors.append(f"{label}: student_id {sid} ({names[sid]}) is missing from this tab")
+                errors.append(f"{label}: student_id {sid} ({names.get(sid, 'unknown')}) is missing from this tab")
 
     incomplete = []
     for sid, rec in data.items():
         miss = []
-        if rec["attendance"] == "":
-            miss.append("attendance")
         for key, vals in rec["marks"].items():
-            miss += [f"{SUBJECT_LABELS[key]} {SLOTS[i][0]}" for i, v in enumerate(vals) if v == ""]
+            subj = next((s for s in subjects if s["key"] == key), None)
+            if subj:
+                slots = subj.get("slots", [])
+                miss += [f"{subj['label']} {slots[i].get('name', 'slot')}" for i, v in enumerate(vals) if v == ""]
         if miss:
-            incomplete.append((sid, names[sid], miss))
+            incomplete.append((sid, names.get(sid, "unknown"), miss))
     return data, errors, incomplete
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--class", dest="cls", type=int, required=True, choices=sorted(CLASS_SUBJECTS))
+    ap.add_argument("--class", dest="cls", type=int, required=True)
     ap.add_argument("--section", required=True)
     ap.add_argument("--entry")
     ap.add_argument("--working-days", type=int)
+    ap.add_argument("--subjects", required=True, help="JSON file with subjects configuration")
+    ap.add_argument("--has-attendance", action="store_true", default=True, help="Workbook has Attendance tab (default: true)")
+    ap.add_argument("--no-attendance", dest="has_attendance", action="store_false", help="Workbook has no Attendance tab")
     ap.add_argument("--out")
     a = ap.parse_args()
 
     tag = f"class{a.cls}{a.section}"
     entry = a.entry or f"out/entry/{tag}_entry.xlsx"
     out_path = a.out or f"data_{tag}.json"
+    
+    # Load subjects from JSON file
+    with open(a.subjects, 'r') as f:
+        subjects_data = json.load(f)
+    
     try:
         wb = load_workbook(entry, data_only=True)
     except FileNotFoundError:
         sys.exit(f"missing file: {entry}")
     try:
-        data, errors, incomplete = merge_workbook(wb, a.cls, a.working_days)
+        data, errors, incomplete = merge_workbook(wb, subjects=subjects_data, has_attendance=a.has_attendance, working_days=a.working_days)
     except WorkbookError as e:
         sys.exit(str(e))
 
