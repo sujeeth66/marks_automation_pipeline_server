@@ -65,10 +65,11 @@ ALLOW_NO_AUTH = os.environ.get("ALLOW_NO_AUTH") == "1"
 ALLOWED_ORIGINS = set(_env_list("ALLOWED_ORIGINS"))
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "20"))
 RATE_PER_MIN = int(os.environ.get("RATE_PER_MIN", "30"))
+IP_RATE_PER_MIN = int(os.environ.get("IP_RATE_PER_MIN", "120"))  # higher: a school can share one address
 MODEL_PATH = os.environ.get("MODEL_PATH", os.path.join(HERE, "model.json"))
 
-if not API_KEYS and not ALLOW_NO_AUTH:
-    raise RuntimeError("Set API_KEYS (comma-separated secret keys). For local testing only, set ALLOW_NO_AUTH=1.")
+if not API_KEYS and not ALLOWED_ORIGINS and not ALLOW_NO_AUTH:
+    raise RuntimeError("Set ALLOWED_ORIGINS (the extension ID, e.g. chrome-extension://<id>), or API_KEYS. For local testing only, set ALLOW_NO_AUTH=1.")
 
 NET = load_model(MODEL_PATH)
 MAX_PHOTOS = 8
@@ -201,9 +202,12 @@ _hits, _lock = defaultdict(deque), threading.Lock()
 
 
 def _who():
-    """-> an id for the caller (a hash, never the key itself), or None if the key is missing or wrong."""
+    """-> an id for the caller (a hash, never the secret itself), or None if the caller is not allowed."""
+    origin = request.headers.get("Origin", "")
+    if origin and origin in ALLOWED_ORIGINS:
+        return "ext:" + hashlib.sha256(origin.encode()).hexdigest()[:8]
     if not API_KEYS:
-        return "dev"
+        return "dev" if ALLOW_NO_AUTH else None
     sent = request.headers.get("X-API-Key", "").encode()
     found = None
     for k in API_KEYS:  # check every key so the time taken doesn't reveal which one matched
@@ -212,13 +216,20 @@ def _who():
     return found
 
 
-def _rate_ok(who):
+def _client_ip():
+    """The address Render recorded for this request (the last entry it appends to X-Forwarded-For)."""
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    return forwarded.split(",")[-1].strip() or request.remote_addr or "unknown"
+
+
+def _rate_ok(who, limit=None):
     now = time.monotonic()
+    limit = RATE_PER_MIN if limit is None else limit
     with _lock:
         q = _hits[who]
         while q and now - q[0] > 60:
             q.popleft()
-        if len(q) >= RATE_PER_MIN:
+        if len(q) >= limit:
             return False
         q.append(now)
         return True
@@ -230,7 +241,7 @@ def protected(fn):
         who = _who()
         if who is None:
             return _err(401, "missing or wrong API key")
-        if not _rate_ok(who):
+        if not _rate_ok(who) or not _rate_ok("ip:" + _client_ip(), IP_RATE_PER_MIN):
             return _err(429, "too many requests; wait a minute and try again")
         try:
             return fn(*args, **kwargs)
@@ -252,16 +263,17 @@ def headers(resp):
     origin = request.headers.get("Origin")
     if origin and origin in ALLOWED_ORIGINS:
         resp.headers["Access-Control-Allow-Origin"] = origin
-        resp.headers["Access-Control-Allow-Headers"] = "X-API-Key, Content-Type"
+        resp.headers["Access-Control-Allow-Headers"] = "X-API-Key, X-Install-Id, Content-Type"
         resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         resp.headers["Vary"] = "Origin"
     return resp
 
-import traceback
-
 @app.errorhandler(Exception)
 def handle(e):
-    traceback.print_exc()   # prints the full error to the console
+    if isinstance(e, HTTPException):          # e.g. unknown route: keep its status code
+        return {"error": e.description}, e.code
+    # Log the error type and route only. Messages and tracebacks can contain student names or marks.
+    app.logger.error("unhandled %s on %s", type(e).__name__, request.path)
     return {"error": "server error"}, 500
 # def unexpected(e):
 #     if isinstance(e, HTTPException):

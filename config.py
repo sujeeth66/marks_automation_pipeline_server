@@ -16,6 +16,7 @@ SUBJECT_LABELS = {
 
 STUDENT_TAG_ID_START = 100
 MAX_STUDENTS = 150
+STUDENTS_PER_SHEET = 25      # students printed on each sheet (one page per 25 students)
 SECTION_CODES = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 # DEPRECATED: Used only for backward compatibility with legacy CLI tools.

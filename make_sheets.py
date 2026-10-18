@@ -34,15 +34,16 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.utils import ImageReader
-from reportlab.platypus import Flowable, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Flowable, Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from config import (
     EXAM_TYPES, MAX_STUDENTS, META_CLASS_BASE, META_EXAM_BASE, META_SECTION_BASE, META_TAB_BASE,
-    SECTION_CODES, STUDENT_TAG_ID_START,
+    SECTION_CODES, STUDENT_TAG_ID_START, STUDENTS_PER_SHEET,
 )
 
 MARGIN = 36
-ROW_H = 27
+ROW_H = 24                  # preferred row height; reduced if the header leaves less room
+MIN_ROW_H = 22              # smallest row that still holds a 20 pt student tag comfortably
 APRILTAG_SIZE = 22          # student tags, points (fits the 27 pt row with padding)
 CORNER_APRILTAG_SIZE = 40   # corner tags, points
 META_TAG_SIZE = 22          # class / section / tab tags, points
@@ -154,11 +155,6 @@ def build_pdf(
     for text, count in zip(extra_headers, digit_counts):
         digit_headers.append(Paragraph(text, head))
         digit_headers.extend([""] * (count - 1))
-    data: list[list[Any]] = [column_headers + digit_headers]
-    for n, (sid, name) in enumerate(roster, start=1):
-        data.append([str(n), sid, Paragraph(escape(name), cell),
-                     _apriltag_flowable(STUDENT_TAG_ID_START + n - 1, APRILTAG_SIZE)]
-                    + [""] * sum(digit_counts))
     widths = [26, 68, 126, 48] + [
         width / count for width, count in zip(extra_widths, digit_counts) for _ in range(count)
     ]
@@ -179,9 +175,6 @@ def build_pdf(
         if count > 1:
             style.append(("SPAN", (col, 0), (col + count - 1, 0)))
         col += count
-    t = Table(data, colWidths=widths, rowHeights=[48] + [ROW_H] * len(roster),
-              repeatRows=1, style=TableStyle(style))
-
     header = Table(
         [[[Paragraph(title, h1), Spacer(1, 3), Paragraph(subtitle, small)]]],
         colWidths=[A4[0] - 2 * MARGIN],
@@ -192,6 +185,33 @@ def build_pdf(
         ]),
     )
     _, header_height = header.wrap(A4[0] - 2 * MARGIN, 10000)
+
+    # Rows are sized from the space left under the header, so 25 rows always fit on one page,
+    # however long the title and subtitle are. Numbers and student tags stay global (roster order).
+    frame_padding = 12          # ReportLab's default frame padding: 6 pt top + 6 pt bottom
+    frame_height = A4[1] - (HEADER_TOP + header_height + 10) - 66 - frame_padding   # must match the doc margins below
+    header_row = 48
+    row_h = min(ROW_H, (frame_height - header_row) / STUDENTS_PER_SHEET)
+    if row_h < MIN_ROW_H:
+        raise ValueError(
+            f"the sheet header is too tall to fit {STUDENTS_PER_SHEET} students on one page; "
+            "shorten the title or subtitle"
+        )
+    tag_size = min(APRILTAG_SIZE, row_h - 1.5)
+    sheets = []
+    for start in range(0, len(roster), STUDENTS_PER_SHEET):
+        chunk = roster[start:start + STUDENTS_PER_SHEET]
+        data: list[list[Any]] = [column_headers + digit_headers]
+        for n, (sid, name) in enumerate(chunk, start=start + 1):
+            data.append([str(n), sid, Paragraph(escape(name), cell),
+                         _apriltag_flowable(STUDENT_TAG_ID_START + n - 1, tag_size)]
+                        + [""] * sum(digit_counts))
+        sheet = Table(data, colWidths=widths, rowHeights=[header_row] + [row_h] * len(chunk),
+                      style=TableStyle(style))
+        _, sheet_height = sheet.wrap(A4[0] - 2 * MARGIN, A4[1])
+        if sheet_height > frame_height:
+            raise RuntimeError("a sheet does not fit on one page; shorten the title or subtitle")
+        sheets.append(sheet)
 
     def footer(canvas, doc):
         canvas.saveState()
@@ -205,7 +225,11 @@ def build_pdf(
 
     doc = SimpleDocTemplate(path, pagesize=A4, leftMargin=MARGIN, rightMargin=MARGIN,
                         topMargin=HEADER_TOP + header_height + 10, bottomMargin=66)
-    story: list[Flowable] = [t]
+    story: list[Flowable] = []
+    for i, sheet in enumerate(sheets):
+        if i:
+            story.append(PageBreak())
+        story.append(sheet)
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
 
 
