@@ -8,3 +8,4 @@ pillow>=10
 pyapriltags>=3.4
 moms_apriltag>=0.4
 zxing-cpp>=2.2,<3
+PyPDF2

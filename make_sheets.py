@@ -6,8 +6,7 @@ Usage:
 
 roster.csv comes from scrapeRoster() in portal_tools.js (columns: student_id,name).
 Output, inside --out:
-  sheets/class3A_<Subject>.pdf     one printable sheet per subject, for that subject's teacher
-  sheets/class3A_Attendance.pdf    attendance sheet
+  class3A_sheets.pdf               one merged PDF containing all subject sheets and attendance sheet
   entry/class3A_entry.xlsx         ONE Excel workbook to type the marks into: a tab per subject plus
                                    Attendance. IDs and names are locked; Tab moves between the boxes.
 The rows keep the roster's order, which is the portal's order.
@@ -23,7 +22,7 @@ import os
 import sys
 from typing import Any
 from xml.sax.saxutils import escape
-
+from PyPDF2 import PdfMerger
 import cv2
 import numpy as np
 from moms_apriltag import TagGenerator3
@@ -232,6 +231,13 @@ def build_pdf(
         story.append(sheet)
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
 
+def merge_pdfs(pdf_paths, output_path):
+    """Merge multiple PDF files into a single PDF."""
+    merger = PdfMerger()
+    for pdf_path in pdf_paths:
+        merger.append(pdf_path)
+    merger.write(output_path)
+    merger.close()
 
 # ---------- Excel workbook ----------
 def write_workbook(path, tag, where, roster, subjects, working_days):
@@ -361,7 +367,7 @@ def generate(
     sheets, entry = os.path.join(out_dir, "sheets"), os.path.join(out_dir, "entry")
     if output in {"all", "pdf"}:
         os.makedirs(sheets, exist_ok=True)
-    if output in {"all", "excel"}:
+    if output == "excel":
         os.makedirs(entry, exist_ok=True)
     details = [f"Class {cls} - Section {section}"]
     if school:
@@ -373,15 +379,19 @@ def generate(
     where = "  |  ".join(details)
     where_pdf = escape(where)  # the PDF text is markup, so & and < must be escaped
 
+    merged_pdf_path = None
     if output in {"all", "pdf"}:
+        pdf_paths = []
+        
         for subject in subjects:
             key = subject["key"]
             label = subject["label"]
             slots = subject["slots"]
             fname = label.replace(" ", "_")
             headers = [f"{slot['name']}<br/>({slot['max']} marks)" for slot in slots]
+            pdf_path = os.path.join(sheets, f"{tag}_{fname}.pdf")
             build_pdf(
-                os.path.join(sheets, f"{tag}_{fname}.pdf"),
+                pdf_path,
                 f"{label} - marks sheet",
                 f"{where_pdf}<br/>Keep the student code visible. Write one digit per box, right-aligned. "
                 f"Leave both boxes empty to record <b>A</b> (absent). "
@@ -392,11 +402,13 @@ def generate(
                 tab_codes,
                 normalized_exam_type,
             )
+            pdf_paths.append(pdf_path)
 
         if has_attendance:
             att_head = "Days attended" + (f"<br/>(out of {working_days})" if working_days else "")
+            pdf_path = os.path.join(sheets, f"{tag}_Attendance.pdf")
             build_pdf(
-                os.path.join(sheets, f"{tag}_Attendance.pdf"),
+                pdf_path,
                 "Attendance sheet",
                 f"{where_pdf}<br/>Keep the student code visible. Write the number of days each student attended."
                 + (f" Working days: {working_days}." if working_days else "")
@@ -407,12 +419,22 @@ def generate(
                 tab_codes,
                 normalized_exam_type,
             )
+            pdf_paths.append(pdf_path)
+        
+        # Merge all PDFs into a single file
+        merged_pdf_path = os.path.join(out_dir, f"{tag}_sheets.pdf")
+        merge_pdfs(pdf_paths, merged_pdf_path)
+        
+        # Clean up individual PDF files
+        for pdf_path in pdf_paths:
+            os.remove(pdf_path)
+        os.rmdir(sheets)
 
-    if output in {"all", "excel"}:
+    if output == "excel":
         workbook = os.path.join(entry, f"{tag}_entry.xlsx")
         write_workbook(workbook, tag, where, roster, subjects, working_days)
         return workbook
-    return None
+    return merged_pdf_path
 
 
 def main():
